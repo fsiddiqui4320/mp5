@@ -1,48 +1,40 @@
 #include "allocator.h"
 #include <string.h>
 
-typedef struct header {
+// block header stored right before the pointer we return
+typedef struct block {
     size_t size;
-    int is_free;
-    struct header *next;
-} header_t;
-
-#define HDR sizeof(header_t)
+    int free;
+    struct block *next; // next free block
+} block_t;
 
 static void *base;
-static size_t used;
-static header_t *freelist;
+static size_t heap_used;
+static block_t *freelist;
 
 void allocator_init(void *newbase) {
     base = newbase;
-    used = 0;
+    heap_used = 0;
     freelist = NULL;
 }
 
 void allocator_reset() {
-    used = 0;
+    heap_used = 0;
     freelist = NULL;
-}
-
-static header_t *get_hdr(void *ptr) {
-    return (header_t *)ptr - 1;
-}
-
-static int is_last(header_t *h) {
-    return (char *)h + HDR + h->size == (char *)base + used;
 }
 
 void *mymalloc(size_t size) {
     if (size == 0) return NULL;
 
-    // check free list first
-    header_t *prev = NULL;
-    header_t *cur = freelist;
-    while (cur) {
+    // search freelist for a block thats big enough
+    block_t *prev = NULL;
+    block_t *cur = freelist;
+    while (cur != NULL) {
         if (cur->size >= size) {
-            if (prev) prev->next = cur->next;
-            else       freelist  = cur->next;
-            cur->is_free = 0;
+            // take it out of the free list
+            if (prev != NULL) prev->next = cur->next;
+            else freelist = cur->next;
+            cur->free = 0;
             cur->next = NULL;
             return (void *)(cur + 1);
         }
@@ -50,55 +42,61 @@ void *mymalloc(size_t size) {
         cur = cur->next;
     }
 
-    header_t *h = (header_t *)((char *)base + used);
-    h->size    = size;
-    h->is_free = 0;
-    h->next    = NULL;
-    used += HDR + size;
-    return (void *)(h + 1);
+    // no free block found, grab new memory from heap
+    block_t *b = (block_t *)((char *)base + heap_used);
+    b->size = size;
+    b->free = 0;
+    b->next = NULL;
+    heap_used += sizeof(block_t) + size;
+    return (void *)(b + 1);
 }
 
 void myfree(void *ptr) {
-    if (!ptr) return;
-    header_t *h = get_hdr(ptr);
+    if (ptr == NULL) return;
 
-    if (is_last(h)) {
-        used = (size_t)((char *)h - (char *)base);
+    block_t *b = (block_t *)ptr - 1;
+
+    // if its the last block just move the heap pointer back
+    char *block_end = (char *)ptr + b->size;
+    if (block_end == (char *)base + heap_used) {
+        heap_used = (size_t)((char *)b - (char *)base);
         return;
     }
 
-    // not the last block, add to free list
-    h->is_free = 1;
-    h->next = freelist;
-    freelist = h;
+    b->free = 1;
+    b->next = freelist;
+    freelist = b;
 }
 
 void *myrealloc(void *ptr, size_t size) {
-    if (!size) { myfree(ptr); return NULL; }
-    if (!ptr)  return mymalloc(size);
+    if (size == 0) { myfree(ptr); return NULL; }
+    if (ptr == NULL) return mymalloc(size);
 
-    header_t *h = get_hdr(ptr);
+    block_t *b = (block_t *)ptr - 1;
 
-    if (size <= h->size) {
-        // shrinking -- if it's the last block we can give memory back
-        if (is_last(h)) {
-            used -= h->size - size;
-            h->size = size;
+    if (size <= b->size) {
+        // shrinking -- give memory back if its the last block
+        char *block_end = (char *)ptr + b->size;
+        if (block_end == (char *)base + heap_used) {
+            heap_used -= b->size - size;
+            b->size = size;
         }
         return ptr;
     }
 
-    if (is_last(h)) {
-        used    += size - h->size;
-        h->size  = size;
+    // growing -- if its the last block just extend it
+    char *block_end = (char *)ptr + b->size;
+    if (block_end == (char *)base + heap_used) {
+        heap_used += size - b->size;
+        b->size = size;
         return ptr;
     }
 
-    // have to move it
-    void *ans = mymalloc(size);
-    if (ans) {
-        memcpy(ans, ptr, h->size);
+    // otherwise alloc new block and copy
+    void *newptr = mymalloc(size);
+    if (newptr != NULL) {
+        memcpy(newptr, ptr, b->size);
         myfree(ptr);
     }
-    return ans;
+    return newptr;
 }
