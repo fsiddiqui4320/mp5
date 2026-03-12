@@ -1,30 +1,34 @@
-CC      = gcc
-CFLAGS  = -g -Wall -Wextra -std=c11
+CASES := $(patsubst %.c,%.so,$(wildcard workloads/*.c))
+CC := cc -Werror -g -O0 -fPIC -I.
 
-# Build all workload .so files plus the test harness
-all: tester workloads/mytest.so
 
-# Test harness (provided by course; compile testharness.c if present)
-tester: testharness.c allocator.c
-	$(CC) $(CFLAGS) -o $@ $^ -ldl
+.PHONY: all test clean build
 
-# Each workload is a shared library: pattern rule covers provided .c files
-workloads/%.so: workloads/%.c allocator.c allocator.h
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ $<
+all: tester mytest.so $(CASES)
 
-# mytest.so from mytest.c
-workloads/mytest.so: mytest.c allocator.h
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ $<
-
-# Standalone debug build of mytest (no harness needed)
-mytest_standalone: mytest.c allocator.c allocator.h
-	$(CC) $(CFLAGS) -DSTANDALONE -o $@ mytest.c allocator.c
-
-# Run all workloads through the harness
-test: tester $(wildcard workloads/*.so)
-	./tester workloads/*.so
+build: tester mytest.so $(CASES)
 
 clean:
-	rm -f tester mytest_standalone workloads/*.so
+	rm -f *.o *.so *.gch tester workloads/*.so workloads/*.o
 
-.PHONY: all test clean
+
+
+tester: testharness.c allocator.o
+	$(CC) -o $@ $^
+
+mytest.so: mytest.o
+	$(CC) -shared -fPIC $^ -o $@
+
+%.o: %.c
+	$(CC) -c $< -o $@
+
+workloads/%.o: workloads/%.c
+	$(CC) -c $< -o $@
+
+workloads/%.so: workloads/%.o
+	$(CC) -shared -fPIC $^ -o $@
+
+	
+test: tester mytest.so $(CASES)
+	./tester
+
