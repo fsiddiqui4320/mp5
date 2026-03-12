@@ -85,8 +85,15 @@ void *myrealloc(void *ptr, size_t size) {
 
     header_t *h = get_hdr(ptr);
 
-    // step 2: shrinking (or same size) -- just return same pointer
-    if (size <= h->size) return ptr;
+    // step 2: shrinking (or same size) -- return same pointer
+    // step 4: if it's also the last block, shrink the heap too
+    if (size <= h->size) {
+        if (is_last(h)) {
+            used -= h->size - size;
+            h->size = size;
+        }
+        return ptr;
+    }
 
     // step 3: growing the last block -- extend in place, no copy needed
     if (is_last(h)) {
